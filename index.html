@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Audio Chunk Extractor</title>
+  <!-- Include WaveSurfer.js and its regions plugin from CDN -->
+  <script src="https://unpkg.com/wavesurfer.js"></script>
+  <script src="https://unpkg.com/wavesurfer.js/dist/plugin/wavesurfer.regions.min.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    #waveform { width: 600px; height: 200px; border: 1px solid #ddd; margin-top: 20px; }
+    #controls { margin-top: 10px; }
+    input[type="text"] { width: 400px; }
+  </style>
+</head>
+<body>
+  <h1>Audio Chunk Extractor</h1>
+  <p>Enter the URL of an audio file (e.g. an MP3) below and click "Load Audio":</p>
+  <input type="text" id="audioUrl" placeholder="Enter audio file URL">
+  <button id="loadBtn">Load Audio</button>
+
+  <div id="waveform"></div>
+
+  <div id="controls">
+    <button id="extractBtn">Extract Selected Chunk</button>
+    <a id="downloadLink" style="display:none; margin-left: 10px;">Download Extracted Audio</a>
+  </div>
+
+  <script>
+    // Create a WaveSurfer instance with the regions plugin enabled.
+    var wavesurfer = WaveSurfer.create({
+      container: '#waveform',
+      waveColor: 'violet',
+      progressColor: 'purple',
+      backend: 'WebAudio',
+      plugins: [
+        WaveSurfer.regions.create({
+          // Enable drag selection on the waveform
+          dragSelection: {
+            slop: 5
+          }
+        })
+      ]
+    });
+
+    // When the "Load Audio" button is clicked, load the audio URL.
+    document.getElementById('loadBtn').addEventListener('click', function() {
+      var url = document.getElementById('audioUrl').value.trim();
+      if(url) {
+        wavesurfer.load(url);
+      }
+    });
+
+    // Optionally: ensure only one region exists at a time.
+    wavesurfer.on('region-created', function(newRegion) {
+      // Remove any other regions
+      for (const id in wavesurfer.regions.list) {
+        if (wavesurfer.regions.list[id] !== newRegion) {
+          wavesurfer.regions.list[id].remove();
+        }
+      }
+    });
+
+    // When "Extract Selected Chunk" is clicked:
+    document.getElementById('extractBtn').addEventListener('click', function() {
+      var regions = Object.values(wavesurfer.regions.list);
+      if(regions.length === 0) {
+        alert("Please select a region by dragging on the waveform.");
+        return;
+      }
+      var region = regions[0];
+      var start = region.start;
+      var end = region.end;
+
+      // Get the decoded audio buffer from WaveSurfer.
+      var originalBuffer = wavesurfer.backend.buffer;
+      if(!originalBuffer) {
+        alert("Audio not loaded yet.");
+        return;
+      }
+
+      // Determine the sample range for the selected region.
+      var audioCtx = wavesurfer.backend.ac;
+      var sampleRate = originalBuffer.sampleRate;
+      var startSample = Math.floor(start * sampleRate);
+      var endSample = Math.floor(end * sampleRate);
+      var frameCount = endSample - startSample;
+      var numChannels = originalBuffer.numberOfChannels;
+
+      // Create a new buffer for the extracted chunk.
+      var newBuffer = audioCtx.createBuffer(numChannels, frameCount, sampleRate);
+      for(var channel = 0; channel < numChannels; channel++) {
+        // Copy the selected samples from the original buffer.
+        var channelData = originalBuffer.getChannelData(channel).slice(startSample, endSample);
+        newBuffer.copyToChannel(channelData, channel);
+      }
+
+      // Encode the new AudioBuffer as a WAV file.
+      var wavView = encodeWAV(newBuffer);
+      var blob = new Blob([wavView], { type: 'audio/wav' });
+      var blobUrl = URL.createObjectURL(blob);
+
+      // Set up the download link.
+      var downloadLink = document.getElementById('downloadLink');
+      downloadLink.href = blobUrl;
+      downloadLink.download = 'extracted_audio.wav';
+      downloadLink.style.display = 'inline';
+      downloadLink.innerText = 'Download Extracted Audio';
+    });
+
+    // Function to encode an AudioBuffer as a WAV file.
+    function encodeWAV(audioBuffer) {
+      var numChannels = audioBuffer.numberOfChannels;
+      var sampleRate = audioBuffer.sampleRate;
+      var bitDepth = 16;
+      var format = 1; // PCM format
+
+      // Interleave channels if necessary.
+      var samples;
+      if(numChannels === 2) {
+        samples = interleave(audioBuffer.getChannelData(0), audioBuffer.getChannelData(1));
+      } else {
+        samples = audioBuffer.getChannelData(0);
+      }
+
+      // Create a buffer for the WAV file.
+      var buffer = new ArrayBuffer(44 + samples.length * 2);
+      var view = new DataView(buffer);
+
+      // Write WAV container header.
+      writeString(view, 0, 'RIFF');
+      view.setUint32(4, 36 + samples.length * 2, true);
+      writeString(view, 8, 'WAVE');
+      writeString(view, 12, 'fmt ');
+      view.setUint32(16, 16, true); // PCM chunk length
+      view.setUint16(20, format, true);
+      view.setUint16(22, numChannels, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * numChannels * bitDepth / 8, true);
+      view.setUint16(32, numChannels * bitDepth / 8, true);
+      view.setUint16(34, bitDepth, true);
+      writeString(view, 36, 'data');
+      view.setUint32(40, samples.length * 2, true);
+
+      // Write PCM samples.
+      var offset = 44;
+      for (var i = 0; i < samples.length; i++, offset += 2) {
+        var s = Math.max(-1, Math.min(1, samples[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      }
+      return view;
+    }
+
+    // Helper: write a string into the DataView.
+    function writeString(view, offset, string) {
+      for (var i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    }
+
+    // Helper: interleave left and right channel data.
+    function interleave(leftChannel, rightChannel) {
+      var length = leftChannel.length + rightChannel.length;
+      var result = new Float32Array(length);
+      var index = 0;
+      for (var i = 0; i < leftChannel.length; i++) {
+        result[index++] = leftChannel[i];
+        result[index++] = rightChannel[i];
+      }
+      return result;
+    }
+  </script>
+</body>
+</html>
