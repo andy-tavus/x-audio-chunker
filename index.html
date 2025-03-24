@@ -1,252 +1,235 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>Audio Chunk Extractor</title>
-  <!-- Include WaveSurfer.js and its regions plugin from CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/wavesurfer.js/7.0.0/wavesurfer.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/wavesurfer.js/7.0.0/plugins/regions.min.js"></script>
-  <style>
-    body { font-family: sans-serif; margin: 20px; }
-    #waveform { width: 600px; height: 200px; border: 1px solid #ddd; margin-top: 20px; }
-    #controls { margin-top: 10px; }
-    input[type="text"] { width: 400px; }
-    #status { color: red; margin-top: 10px; }
-  </style>
+    <title>WaveSurfer Regions Example</title>
+    <script type="module">
+        import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js'
+        import RegionsPlugin from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js'
+
+        // Initialize the Regions plugin
+        const regions = RegionsPlugin.create()
+
+        // Create a WaveSurfer instance
+        const ws = WaveSurfer.create({
+            container: '#waveform',
+            waveColor: '#4F4A85',
+            progressColor: '#383351',
+            url: 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg',
+            plugins: [regions],
+        })
+
+        // Add pause button functionality
+        document.getElementById('pause').addEventListener('click', () => {
+            ws.pause()
+        })
+
+        // Function to extract and download region
+        async function extractRegion(region) {
+            const audioContext = new AudioContext()
+            const audioData = await fetch(ws.getMediaElement().src)
+            const arrayBuffer = await audioData.arrayBuffer()
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+            
+            const start = Math.floor(region.start * audioBuffer.sampleRate)
+            const end = Math.floor(region.end * audioBuffer.sampleRate)
+            const frameCount = end - start
+            
+            const extractedBuffer = audioContext.createBuffer(
+                audioBuffer.numberOfChannels,
+                frameCount,
+                audioBuffer.sampleRate
+            )
+            
+            for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+                const channelData = audioBuffer.getChannelData(channel)
+                const extractedData = channelData.slice(start, end)
+                extractedBuffer.copyToChannel(extractedData, channel)
+            }
+            
+            const wav = audioBufferToWav(extractedBuffer)
+            const blob = new Blob([wav], { type: 'audio/wav' })
+            const url = URL.createObjectURL(blob)
+            
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `region_${region.start.toFixed(2)}_${region.end.toFixed(2)}.wav`
+            document.body.appendChild(a)
+            a.click()
+            document.body.removeChild(a)
+            URL.revokeObjectURL(url)
+        }
+
+        // Helper function to convert AudioBuffer to WAV
+        function audioBufferToWav(buffer) {
+            const numChannels = buffer.numberOfChannels
+            const sampleRate = buffer.sampleRate
+            const format = 1
+            const bitDepth = 16
+            
+            const bytesPerSample = bitDepth / 8
+            const blockAlign = numChannels * bytesPerSample
+            
+            const wav = new ArrayBuffer(44 + buffer.length * blockAlign)
+            const view = new DataView(wav)
+            
+            // WAV header
+            writeString(view, 0, 'RIFF')
+            view.setUint32(4, 36 + buffer.length * blockAlign, true)
+            writeString(view, 8, 'WAVE')
+            writeString(view, 12, 'fmt ')
+            view.setUint32(16, 16, true)
+            view.setUint16(20, format, true)
+            view.setUint16(22, numChannels, true)
+            view.setUint32(24, sampleRate, true)
+            view.setUint32(28, sampleRate * blockAlign, true)
+            view.setUint16(32, blockAlign, true)
+            view.setUint16(34, bitDepth, true)
+            writeString(view, 36, 'data')
+            view.setUint32(40, buffer.length * blockAlign, true)
+            
+            // Write audio data
+            const data = new Float32Array(buffer.length)
+            for (let channel = 0; channel < numChannels; channel++) {
+                const channelData = buffer.getChannelData(channel)
+                for (let i = 0; i < buffer.length; i++) {
+                    data[i] += channelData[i]
+                }
+            }
+            
+            let offset = 44
+            for (let i = 0; i < data.length; i++) {
+                const sample = Math.max(-1, Math.min(1, data[i]))
+                view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true)
+                offset += 2
+            }
+            
+            return wav
+        }
+
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i))
+            }
+        }
+
+        // Create some regions at specific time ranges
+        ws.on('decode', () => {
+            // Regions
+            regions.addRegion({
+                start: 0,
+                end: 8,
+                content: 'Resize me - click to Play Selection',
+                color: 'rgba(79, 74, 133, 0.3)',
+                drag: false,
+                resize: true,
+            })
+            regions.addRegion({
+                start: 9,
+                end: 10,
+                content: 'Cramped region',
+                color: 'rgba(79, 74, 133, 0.3)',
+                minLength: 1,
+                maxLength: 10,
+            })
+            regions.addRegion({
+                start: 12,
+                end: 17,
+                content: 'Drag me',
+                color: 'rgba(79, 74, 133, 0.3)',
+                resize: false,
+            })
+
+            // Markers (zero-length regions)
+            regions.addRegion({
+                start: 19,
+                content: 'Marker',
+                color: 'rgba(79, 74, 133, 0.5)',
+            })
+            regions.addRegion({
+                start: 20,
+                content: 'Second marker',
+                color: 'rgba(79, 74, 133, 0.5)',
+            })
+        })
+
+        regions.enableDragSelection({
+            color: 'rgba(79, 74, 133, 0.2)',
+        })
+
+        regions.on('region-updated', (region) => {
+            console.log('Updated region', region)
+        })
+
+        // Loop a region on click
+        let loop = false
+        let selectedRegion = null
+        // Toggle looping with a checkbox
+        document.querySelector('input[type="checkbox"]').onclick = (e) => {
+            loop = e.target.checked
+        }
+
+        {
+            let activeRegion = null
+            regions.on('region-in', (region) => {
+                console.log('region-in', region)
+                activeRegion = region
+            })
+            regions.on('region-out', (region) => {
+                console.log('region-out', region)
+                if (activeRegion === region) {
+                    if (loop) {
+                        region.play()
+                    } else {
+                        activeRegion = null
+                    }
+                }
+            })
+            regions.on('region-clicked', (region, e) => {
+                e.stopPropagation() // prevent triggering a click on the waveform
+                activeRegion = region
+                selectedRegion = region
+                region.play(true)
+                document.getElementById('download').disabled = false
+            })
+            // Reset the active region when the user clicks anywhere in the waveform
+            ws.on('interaction', () => {
+                activeRegion = null
+                selectedRegion = null
+                document.getElementById('download').disabled = true
+            })
+        }
+
+        // Add download button functionality
+        document.getElementById('download').addEventListener('click', () => {
+            if (selectedRegion) {
+                extractRegion(selectedRegion)
+            }
+        })
+
+        // Update the zoom level on slider change
+        ws.once('decode', () => {
+            document.querySelector('input[type="range"]').oninput = (e) => {
+                const minPxPerSec = Number(e.target.value)
+                ws.zoom(minPxPerSec)
+            }
+        })
+    </script>
 </head>
 <body>
-  <h1>Audio Chunk Extractor</h1>
-  <p>Enter the URL of an audio file (e.g. an MP3) below and click "Load Audio":</p>
-  <input type="text" id="audioUrl" placeholder="Enter audio file URL" value="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg">
-  <button id="loadBtn">Load Audio</button>
-  <div id="status"></div>
+    <div id="waveform"></div>
 
-  <div id="waveform"></div>
+    <p>
+        <button id="pause">Pause</button>
+        <label style="margin-left: 2em">
+            <input type="checkbox" />
+            Loop Selection
+        </label>
 
-  <div id="controls">
-    <button id="extractBtn">Extract Selected Chunk</button>
-    <a id="downloadLink" style="display:none; margin-left: 10px;">Download Extracted Audio</a>
-  </div>
+        <label style="margin-left: 2em">
+            Zoom: <input type="range" min="10" max="1000" value="10" />
+        </label>
 
-  <script>
-    // Debug logging
-    console.log('WaveSurfer:', WaveSurfer);
-    console.log('WaveSurfer.Regions:', WaveSurfer.Regions);
-    console.log('WaveSurfer.RegionsPlugin:', WaveSurfer.RegionsPlugin);
-    
-    let wavesurfer;
-    try {
-      // Create a WaveSurfer instance with the regions plugin enabled.
-      wavesurfer = WaveSurfer.create({
-        container: '#waveform',
-        waveColor: 'violet',
-        progressColor: 'purple',
-        backend: 'WebAudio',
-        plugins: [
-          WaveSurfer.Regions.create({
-            dragSelection: true,
-            slop: 5,
-            color: 'rgba(255, 0, 0, 0.2)',
-            handleStyle: {
-              left: {
-                backgroundColor: 'red',
-                width: '2px',
-                cursor: 'ew-resize'
-              },
-              right: {
-                backgroundColor: 'red',
-                width: '2px',
-                cursor: 'ew-resize'
-              }
-            }
-          })
-        ]
-      });
-
-      // Wait for the regions plugin to be ready
-      wavesurfer.on('ready', function() {
-        document.getElementById('status').textContent = 'Audio loaded successfully! Click and drag on the waveform to select a region.';
-        console.log('WaveSurfer ready, regions:', wavesurfer.regions);
-        // Initialize regions plugin if not already initialized
-        if (!wavesurfer.regions) {
-          const regionsPlugin = wavesurfer.plugins.find(p => p instanceof WaveSurfer.Regions);
-          if (regionsPlugin) {
-            wavesurfer.regions = regionsPlugin;
-            console.log('Regions plugin initialized:', wavesurfer.regions);
-          }
-        }
-      });
-
-      // When the "Load Audio" button is clicked, load the audio URL.
-      document.getElementById('loadBtn').addEventListener('click', function() {
-        var url = document.getElementById('audioUrl').value.trim();
-        if(url) {
-          document.getElementById('status').textContent = 'Loading audio...';
-          wavesurfer.load(url);
-        }
-      });
-
-      // Add error handling for audio loading
-      wavesurfer.on('error', function(err) {
-        console.error('WaveSurfer error:', err);
-        document.getElementById('status').textContent = 'Error loading audio: ' + err;
-      });
-
-      // Add loading progress indicator
-      wavesurfer.on('loading', function(progress) {
-        document.getElementById('status').textContent = 'Loading audio: ' + Math.round(progress) + '%';
-      });
-
-      // Handle region creation
-      wavesurfer.on('region-created', function(newRegion) {
-        console.log('Region created:', newRegion);
-        // Get all regions and remove any that aren't the new one
-        const regions = wavesurfer.regions.getRegions();
-        console.log('Current regions:', regions);
-        regions.forEach(region => {
-          if (region !== newRegion) {
-            region.remove();
-          }
-        });
-      });
-
-      // Add debug logging for mouse events
-      wavesurfer.on('interaction', function() {
-        console.log('Waveform interaction detected');
-        // Try to create a region programmatically
-        const duration = wavesurfer.getDuration();
-        if (duration) {
-          console.log('Creating test region...');
-          const regionsPlugin = wavesurfer.plugins.find(p => p instanceof WaveSurfer.Regions);
-          if (regionsPlugin) {
-            regionsPlugin.addRegion({
-              start: 0,
-              end: duration / 2,
-              color: 'rgba(255, 0, 0, 0.2)'
-            });
-            console.log('Region created via plugin');
-          }
-        }
-      });
-
-      // When "Extract Selected Chunk" is clicked:
-      document.getElementById('extractBtn').addEventListener('click', function() {
-        console.log('Extract button clicked');
-        console.log('WaveSurfer instance:', wavesurfer);
-        console.log('Regions plugin:', wavesurfer.regions);
-        
-        const regions = wavesurfer.regions.getRegions();
-        console.log('Regions:', regions);
-        
-        if(regions.length === 0) {
-          alert("Please select a region by dragging on the waveform.");
-          return;
-        }
-        const region = regions[0];
-        const start = region.start;
-        const end = region.end;
-
-        // Get the decoded audio buffer from WaveSurfer.
-        const originalBuffer = wavesurfer.decodedData;
-        if(!originalBuffer) {
-          alert("Audio not loaded yet.");
-          return;
-        }
-
-        // Create a new AudioContext for processing
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const sampleRate = originalBuffer.sampleRate;
-        const startSample = Math.floor(start * sampleRate);
-        const endSample = Math.floor(end * sampleRate);
-        const frameCount = endSample - startSample;
-        const numChannels = originalBuffer.numberOfChannels;
-
-        // Create a new buffer for the extracted chunk.
-        const newBuffer = audioCtx.createBuffer(numChannels, frameCount, sampleRate);
-        for(let channel = 0; channel < numChannels; channel++) {
-          // Copy the selected samples from the original buffer.
-          const channelData = originalBuffer.getChannelData(channel).slice(startSample, endSample);
-          newBuffer.copyToChannel(channelData, channel);
-        }
-
-        // Encode the new AudioBuffer as a WAV file.
-        const wavView = encodeWAV(newBuffer);
-        const blob = new Blob([wavView], { type: 'audio/wav' });
-        const blobUrl = URL.createObjectURL(blob);
-
-        // Set up the download link.
-        const downloadLink = document.getElementById('downloadLink');
-        downloadLink.href = blobUrl;
-        downloadLink.download = 'extracted_audio.wav';
-        downloadLink.style.display = 'inline';
-        downloadLink.innerText = 'Download Extracted Audio';
-      });
-
-      // Function to encode an AudioBuffer as a WAV file.
-      function encodeWAV(audioBuffer) {
-        var numChannels = audioBuffer.numberOfChannels;
-        var sampleRate = audioBuffer.sampleRate;
-        var bitDepth = 16;
-        var format = 1; // PCM format
-
-        // Interleave channels if necessary.
-        var samples;
-        if(numChannels === 2) {
-          samples = interleave(audioBuffer.getChannelData(0), audioBuffer.getChannelData(1));
-        } else {
-          samples = audioBuffer.getChannelData(0);
-        }
-
-        // Create a buffer for the WAV file.
-        var buffer = new ArrayBuffer(44 + samples.length * 2);
-        var view = new DataView(buffer);
-
-        // Write WAV container header.
-        writeString(view, 0, 'RIFF');
-        view.setUint32(4, 36 + samples.length * 2, true);
-        writeString(view, 8, 'WAVE');
-        writeString(view, 12, 'fmt ');
-        view.setUint32(16, 16, true); // PCM chunk length
-        view.setUint16(20, format, true);
-        view.setUint16(22, numChannels, true);
-        view.setUint32(24, sampleRate, true);
-        view.setUint32(28, sampleRate * numChannels * bitDepth / 8, true);
-        view.setUint16(32, numChannels * bitDepth / 8, true);
-        view.setUint16(34, bitDepth, true);
-        writeString(view, 36, 'data');
-        view.setUint32(40, samples.length * 2, true);
-
-        // Write PCM samples.
-        var offset = 44;
-        for (var i = 0; i < samples.length; i++, offset += 2) {
-          var s = Math.max(-1, Math.min(1, samples[i]));
-          view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-        }
-        return view;
-      }
-
-      // Helper: write a string into the DataView.
-      function writeString(view, offset, string) {
-        for (var i = 0; i < string.length; i++) {
-          view.setUint8(offset + i, string.charCodeAt(i));
-        }
-      }
-
-      // Helper: interleave left and right channel data.
-      function interleave(leftChannel, rightChannel) {
-        var length = leftChannel.length + rightChannel.length;
-        var result = new Float32Array(length);
-        var index = 0;
-        for (var i = 0; i < leftChannel.length; i++) {
-          result[index++] = leftChannel[i];
-          result[index++] = rightChannel[i];
-        }
-        return result;
-      }
-    } catch (e) {
-      console.error('Error creating WaveSurfer:', e);
-      document.getElementById('status').textContent = 'Error creating WaveSurfer: ' + e.message;
-    }
-  </script>
+        <button id="download" disabled style="margin-left: 2em">Download Selection</button>
+    </p>
 </body>
 </html>
