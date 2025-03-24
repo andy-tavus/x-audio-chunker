@@ -2,9 +2,14 @@
 <html>
 <head>
     <title>WaveSurfer Regions Example</title>
+    <link rel="icon" type="image/x-icon" href="https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f3b5.png">
     <script type="module">
         import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js'
         import RegionsPlugin from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js'
+
+        // Get audio URL from URL parameter
+        const urlParams = new URLSearchParams(window.location.search)
+        const audioUrl = urlParams.get('audio') || 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg'
 
         // Initialize the Regions plugin
         const regions = RegionsPlugin.create()
@@ -14,7 +19,7 @@
             container: '#waveform',
             waveColor: '#4F4A85',
             progressColor: '#383351',
-            url: 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg',
+            url: audioUrl,
             plugins: [regions],
         })
 
@@ -88,19 +93,13 @@
             view.setUint32(40, buffer.length * blockAlign, true)
             
             // Write audio data
-            const data = new Float32Array(buffer.length)
-            for (let channel = 0; channel < numChannels; channel++) {
-                const channelData = buffer.getChannelData(channel)
-                for (let i = 0; i < buffer.length; i++) {
-                    data[i] += channelData[i]
-                }
-            }
-            
             let offset = 44
-            for (let i = 0; i < data.length; i++) {
-                const sample = Math.max(-1, Math.min(1, data[i]))
-                view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true)
-                offset += 2
+            for (let i = 0; i < buffer.length; i++) {
+                for (let channel = 0; channel < numChannels; channel++) {
+                    const sample = buffer.getChannelData(channel)[i]
+                    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true)
+                    offset += 2
+                }
             }
             
             return wav
@@ -114,41 +113,14 @@
 
         // Create some regions at specific time ranges
         ws.on('decode', () => {
-            // Regions
+            // Single resizeable region
             regions.addRegion({
                 start: 0,
                 end: 8,
-                content: 'Resize me - click to Play Selection',
+                content: 'Resize & Drag - Click to Play Selection',
                 color: 'rgba(79, 74, 133, 0.3)',
-                drag: false,
+                drag: true,
                 resize: true,
-            })
-            regions.addRegion({
-                start: 9,
-                end: 10,
-                content: 'Cramped region',
-                color: 'rgba(79, 74, 133, 0.3)',
-                minLength: 1,
-                maxLength: 10,
-            })
-            regions.addRegion({
-                start: 12,
-                end: 17,
-                content: 'Drag me',
-                color: 'rgba(79, 74, 133, 0.3)',
-                resize: false,
-            })
-
-            // Markers (zero-length regions)
-            regions.addRegion({
-                start: 19,
-                content: 'Marker',
-                color: 'rgba(79, 74, 133, 0.5)',
-            })
-            regions.addRegion({
-                start: 20,
-                content: 'Second marker',
-                color: 'rgba(79, 74, 133, 0.5)',
             })
         })
 
