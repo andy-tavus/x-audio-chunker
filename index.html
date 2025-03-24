@@ -28,7 +28,7 @@
             ws.pause()
         })
 
-        // Function to extract and download region
+        // Function to extract and send region to parent
         async function extractRegion(region) {
             const audioContext = new AudioContext()
             const audioData = await fetch(ws.getMediaElement().src)
@@ -53,15 +53,16 @@
             
             const wav = audioBufferToWav(extractedBuffer)
             const blob = new Blob([wav], { type: 'audio/wav' })
-            const url = URL.createObjectURL(blob)
             
-            const a = document.createElement('a')
-            a.href = url
-            a.download = `region_${region.start.toFixed(2)}_${region.end.toFixed(2)}.wav`
-            document.body.appendChild(a)
-            a.click()
-            document.body.removeChild(a)
-            URL.revokeObjectURL(url)
+            // Send the audio data to the parent window
+            window.parent.postMessage({
+                type: 'audioSelection',
+                data: {
+                    start: region.start,
+                    end: region.end,
+                    blob: blob
+                }
+            }, '*')
         }
 
         // Helper function to convert AudioBuffer to WAV
@@ -201,7 +202,7 @@
             Zoom: <input type="range" min="10" max="1000" value="10" />
         </label>
 
-        <button id="download" disabled style="margin-left: 2em">Download Selection</button>
+        <button id="download" disabled style="margin-left: 2em">Send Selection</button>
     </p>
 </body>
 </html>
